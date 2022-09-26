@@ -9,6 +9,7 @@ pub fn expand(cont: &Container, decl: Decl) -> TokenStream {
     let ident = cont.ident();
 
     let decl_str = decl.to_string();
+    let typescript_type = decl.id();
     let (impl_generics, ty_generics, where_clause) = cont.generics().split_for_impl();
 
     let typescript_custom_section = quote! {
@@ -19,11 +20,28 @@ pub fn expand(cont: &Container, decl: Decl) -> TokenStream {
     let wasm_abi = attrs.into_wasm_abi || attrs.from_wasm_abi;
 
     let wasm_describe = wasm_abi.then(|| {
+        let mut name = typescript_type.clone();
+        if !cont.generics().params.is_empty() {
+            name.push_str("<");
+            for (i, _) in cont.generics().params.iter().enumerate() {
+                if i > 0 {
+                    name.push_str(", ");
+                }
+                name.push_str("any");
+            }
+            name.push_str(">");
+        }
+
+        let name_len = name.len() as u32;
+        let name_chars = name.chars().map(|c| c as u32);
         quote! {
             impl #impl_generics WasmDescribe for #ident #ty_generics #where_clause {
                 #[inline]
                 fn describe() {
-                    <Self as Tsify>::JsType::describe()
+                    use wasm_bindgen::describe::*;
+                    inform(NAMED_EXTERNREF);
+                    inform(#name_len);
+                    #(inform(#name_chars);)*
                 }
             }
         }
@@ -39,8 +57,6 @@ pub fn expand(cont: &Container, decl: Decl) -> TokenStream {
     });
     let into_wasm_abi = attrs.into_wasm_abi.then(|| expand_into_wasm_abi(cont));
     let from_wasm_abi = attrs.from_wasm_abi.then(|| expand_from_wasm_abi(cont));
-
-    let typescript_type = decl.id();
 
     quote! {
         #[automatically_derived]
